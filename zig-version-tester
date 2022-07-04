@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+import sys
+import os
+import shutil
+import subprocess
+
+DEFAULT_VERSION_FILE = os.path.join(os.getenv("HOME"), "zig-versions.txt")
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+def updateVersionFile(filename):
+    sys.exit("TODO: update version file '{}'".format(filename))
+
+def dumpSubprocessResult(result):
+    stdout = result.stdout.decode('utf8').strip()
+    if len(stdout) > 0:
+        eprint(stdout)
+    stderr = result.stderr.decode('utf8').strip()
+    if len(stderr) > 0:
+        eprint(stderr)
+    
+def main():
+    version_file = DEFAULT_VERSION_FILE
+    argv_index = 1
+    while argv_index < len(sys.argv):
+        arg = sys.argv[argv_index]
+        if arg == "--version-file":
+            argv_index += 2
+            version_file = sys.argv[argv_index - 1]
+        else:
+            break
+    cmd_args = sys.argv[argv_index:]
+    
+    if len(cmd_args) == 0:
+        eprint("zig-version-tester: find out which versions of zig work")
+        eprint("Run 'zig-version-tester update' to update the version list")
+        eprint("Call 'zig-version-tester' with the same arguments that you would pass to zig, i.e.")
+        eprint("    zig-version-tester build test")
+        eprint("Options:")
+        eprint("    --version-file VERSION_FILE  override default '{}'".format(DEFAULT_VERSION_FILE))
+        sys.exit(1)
+
+    if cmd_args[0] == "update":
+        updateVersionFile(version_file)
+        return
+        
+    zigup = shutil.which("zigup")
+    if not zigup:
+        sys.exit("error: zig-version-tester requires 'zigup', checkout https://github.com/marler8997/zigup")
+
+    with open(version_file, "r") as f:
+        versions = f.read().splitlines()
+    eprint("[zig-version-tester] Found {} versions in '{}'".format(len(versions), version_file))
+
+    first_working = None
+    work_count = 0
+    last_working = None
+    
+    for version in versions:
+        eprint("[zig-version-tester] Testing '{}'...".format(version))
+        fetch_cmd = [zigup, "fetch", version]
+        eprint("[zig-version-tester] Run: {}".format(" ".join(fetch_cmd)))
+        fetch_result = subprocess.run(fetch_cmd, capture_output=True)
+        if fetch_result.returncode != 0:
+            dumpSubprocessResult(fetch_result)
+            sys.exit()
+        zig_cmd = [zigup, "run", version] + cmd_args
+        eprint("[zig-version-tester] Run: {}".format(" ".join(zig_cmd)))
+        zig_result = subprocess.run(zig_cmd, capture_output=True)
+        if zig_result.returncode == 0:
+            work_count += 1
+            last_working = version
+            if first_working == None:
+                first_working = version
+        else:
+            if last_working != None:
+                break
+            eprint("[zig-version-tester] Failed with:")
+            dumpSubprocessResult(zig_result)
+
+    sys.stderr.flush()
+    prefix = "Works with {} version(s) out of {}".format(work_count, len(versions))
+    if work_count == 0:
+        print(prefix)
+    else:
+        print("{}, from {} to {}".format(prefix, first_working, last_working))
+
+main()
